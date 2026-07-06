@@ -5,7 +5,7 @@ backend:
   # OAuth handshake is served by the Netlify Functions in netlify/functions/
   # (auth.js + callback.js), deployed on a separate Netlify site. Replace
   # this with that site's real URL once it's deployed.
-  base_url: https://REPLACE-WITH-YOUR-NETLIFY-SITE.netlify.app
+  base_url: https://liberohaus.netlify.app
   auth_endpoint: auth
 
 media_folder: "assets/uploads"
