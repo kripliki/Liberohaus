@@ -1,13 +1,12 @@
+const crypto = require("crypto")
+
+const STATE_MAX_AGE_MS = 10 * 60 * 1000
+
 exports.handler = async (event) => {
   const { code, state, error, error_description: errorDescription } = event.queryStringParameters || {}
 
   if (error) {
     return htmlResponse(renderMessage("error", { error, description: errorDescription }))
-  }
-
-  const cookieState = parseCookies(event.headers.cookie).oauth_state
-  if (!state || !cookieState || state !== cookieState) {
-    return htmlResponse(renderMessage("error", { error: "invalid_state", description: "OAuth state mismatch" }))
   }
 
   const clientId = process.env.GITHUB_CLIENT_ID
@@ -16,6 +15,10 @@ exports.handler = async (event) => {
     return htmlResponse(
       renderMessage("error", { error: "server_misconfigured", description: "Missing GitHub client credentials" })
     )
+  }
+
+  if (!isValidState(state, clientSecret)) {
+    return htmlResponse(renderMessage("error", { error: "invalid_state", description: "OAuth state mismatch" }))
   }
 
   const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
@@ -29,13 +32,27 @@ exports.handler = async (event) => {
     return htmlResponse(renderMessage("error", { error: tokenData.error, description: tokenData.error_description }))
   }
 
-  return {
-    ...htmlResponse(renderMessage("success", { token: tokenData.access_token, provider: "github" })),
-    headers: {
-      "Content-Type": "text/html",
-      "Set-Cookie": "oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
-    },
+  return htmlResponse(renderMessage("success", { token: tokenData.access_token, provider: "github" }))
+}
+
+// Mirrors the signing done in auth.js: verify nonce+timestamp+signature instead
+// of comparing against a stored cookie, since that cookie doesn't reliably
+// survive the redirect bounce through github.com and back on all browsers.
+const STATE_FORMAT = /^([0-9a-f]{32})\.(\d+)\.([0-9a-f]{64})$/
+
+function isValidState(state, secret) {
+  if (!state) return false
+  const match = STATE_FORMAT.exec(state)
+  if (!match) return false
+  const [, nonce, timestamp, signature] = match
+  const expected = crypto.createHmac("sha256", secret).update(`${nonce}.${timestamp}`).digest("hex")
+  const signatureBuffer = Buffer.from(signature, "hex")
+  const expectedBuffer = Buffer.from(expected, "hex")
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return false
   }
+  const age = Date.now() - Number(timestamp)
+  return age >= 0 && age < STATE_MAX_AGE_MS
 }
 
 function renderMessage(status, payload) {
@@ -62,17 +79,4 @@ function htmlResponse(body) {
     headers: { "Content-Type": "text/html" },
     body: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`,
   }
-}
-
-function parseCookies(header) {
-  return Object.fromEntries(
-    (header || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const idx = part.indexOf("=")
-        return [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))]
-      })
-  )
 }
