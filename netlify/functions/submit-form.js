@@ -44,7 +44,7 @@ exports.handler = async (event) => {
     return jsonResponse(400, { ok: false, error: "missing_required_fields" }, corsHeaders)
   }
 
-  const apiKey = process.env.RESEND_API_KEY
+  const apiKey = process.env.RESEND_API_KEY || process.env.RESEND_API_SECRET
   const toEmail = process.env.FORM_TO_EMAIL
   const fromEmail = process.env.FORM_FROM_EMAIL
   if (!apiKey || !toEmail || !fromEmail) {
@@ -73,6 +73,8 @@ exports.handler = async (event) => {
   })
 
   if (!emailResponse.ok) {
+    const errorBody = await emailResponse.text().catch(() => "")
+    console.error(`Resend API request failed (${emailResponse.status}): ${errorBody}`)
     return jsonResponse(502, { ok: false, error: "email_send_failed" }, corsHeaders)
   }
 
